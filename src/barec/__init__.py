@@ -1,4 +1,4 @@
-"""Utilities for the BAREC Task 1 strict-track baseline."""
+"""Các tiện ích dùng chung cho baseline BAREC Task 1 strict-track."""
 
 __all__ = ["__version__"]
 

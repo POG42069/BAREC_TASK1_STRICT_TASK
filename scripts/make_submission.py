@@ -12,6 +12,7 @@ from barec.submission import build_submission  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
+    """Đọc tham số dòng lệnh cho bước đóng gói submission."""
     parser = argparse.ArgumentParser(description="Build a Codabench prediction.zip submission.")
     parser.add_argument("--predictions", required=True, help="CSV containing Sentence ID/ID and Prediction columns.")
     parser.add_argument("--output-dir", default="submission", help="Directory for prediction and prediction.zip.")
@@ -19,6 +20,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Tạo file `prediction` và `prediction.zip` từ CSV dự đoán."""
     args = parse_args()
     prediction_file, zip_file = build_submission(args.predictions, args.output_dir)
     print(f"Wrote Codabench prediction file: {prediction_file}")

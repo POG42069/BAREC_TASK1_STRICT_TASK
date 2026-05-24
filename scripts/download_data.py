@@ -16,6 +16,7 @@ SPLIT_TO_FILE = {
 
 
 def parse_args() -> argparse.Namespace:
+    """Đọc tham số dòng lệnh cho bước tải dataset."""
     parser = argparse.ArgumentParser(description="Download the BAREC Corpus v1.0 dataset.")
     parser.add_argument("--output-dir", default="data/barec-corpus-v1", help="Directory to write split CSV files.")
     parser.add_argument("--dataset-id", default=DATASET_ID, help="Hugging Face dataset id.")
@@ -23,6 +24,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Tải BAREC Corpus và ghi từng split ra CSV trong thư mục project."""
     args = parse_args()
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -34,6 +36,7 @@ def main() -> None:
         if split not in dataset:
             raise ValueError(f"Dataset is missing expected split: {split}")
 
+        # Mỗi split phải có ID câu, input D3Tok, và nhãn 19 mức.
         frame = dataset[split].to_pandas()
         missing = sorted(REQUIRED_COLUMNS - set(frame.columns))
         if missing:

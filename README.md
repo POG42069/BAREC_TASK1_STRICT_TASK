@@ -1,13 +1,26 @@
 # BAREC Task 1 Strict Track Baseline
 
-This repository implements the BAREC Shared Task sentence-level strict-track baseline:
+Project này triển khai baseline cho BAREC Shared Task sentence-level strict track.
 
-- pretrained model: `aubmindlab/bert-base-arabertv2`
-- input variant: `D3Tok`
-- loss: standard multi-class cross-entropy
-- labels: 19 readability levels, exported as integers `1..19`
+- Model pretrained: `aubmindlab/bert-base-arabertv2`
+- Input: cột `D3Tok` có sẵn trong BAREC Corpus
+- Loss: Cross-entropy cho phân loại 19 mức
+- Output nộp Codabench: `submission/prediction.zip`
 
-Strict-track note: do not add external readability corpora, lexicons, synthetic labels, LLM-generated data, or any other outside training data. The scripts use only the BAREC Corpus and the pretrained AraBERTv2 checkpoint.
+## Cấu trúc quan trọng
+
+```text
+data/barec-corpus-v1/
+  train.csv
+  dev.csv
+  test.csv
+train.py
+eval.py
+scripts/
+src/
+```
+
+Thư mục `data/barec-corpus-v1` đã nằm sẵn trong project. Không cần tải lại dataset trước khi train.
 
 ## Setup
 
@@ -18,54 +31,58 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-## Download Data
+## Chạy Training Và Tạo File Nộp
+
+Chỉ cần chạy:
 
 ```powershell
-python scripts/download_data.py --output-dir data/barec-corpus-v1
+python train.py
 ```
 
-The script downloads `CAMeL-Lab/BAREC-Corpus-v1.0` from Hugging Face and writes `train.csv`, `dev.csv`, and `test.csv`. The dataset already includes the `D3Tok` input column required for Baseline II.
+Lệnh này sẽ tự làm toàn bộ pipeline:
 
-## Train
+1. Đọc `data/barec-corpus-v1/train.csv`, `dev.csv`, `test.csv`.
+2. Fine-tune AraBERTv2 bằng cột `D3Tok`.
+3. In training loss trong lúc chạy.
+4. In score trên dev: Accuracy, Accuracy +/-1, Average absolute distance, QWK, Accuracy 7/5/3 levels.
+5. Dự đoán test.
+6. Tạo `submission/prediction` và `submission/prediction.zip`.
 
-Do not run training until the project owner confirms.
+File zip cuối cùng để nộp nằm ở:
+
+```text
+submission/prediction.zip
+```
+
+## Tùy Chỉnh Nhanh
+
+Ví dụ train ít epoch hơn để thử pipeline:
 
 ```powershell
-python scripts/train.py `
-  --data-dir data/barec-corpus-v1 `
-  --model-name aubmindlab/bert-base-arabertv2 `
-  --input-column D3Tok `
-  --label-column Readability_Level_19 `
-  --output-dir models/arabertv2-d3tok-ce
+python train.py --epochs 1 --train-batch-size 8 --eval-batch-size 16
 ```
 
-During training, the script prints training loss at logging steps and evaluation scores after each evaluation pass: accuracy, macro-F1, and quadratic weighted kappa.
+Các tham số mặc định chính:
 
-## Predict
+- `--data-dir data/barec-corpus-v1`
+- `--model-name aubmindlab/bert-base-arabertv2`
+- `--input-column D3Tok`
+- `--label-column Readability_Level_19`
+- `--output-dir models/arabertv2-d3tok-ce`
+- `--submission-dir submission`
+
+## Eval Script Của Ban Tổ Chức
+
+File `eval.py` được thêm ở root project theo script ban tổ chức cung cấp, có chú thích tiếng Việt.
+
+Ví dụ:
 
 ```powershell
-python scripts/predict.py `
-  --model-dir models/arabertv2-d3tok-ce `
-  --input-file data/barec-corpus-v1/test.csv `
-  --output-file outputs/test_predictions.csv
+python eval.py --output outputs/dev_predictions.csv --split Dev --task Sent
 ```
 
-## Make Codabench Submission
+Lưu ý: script này tải ground truth từ Hugging Face theo dataset shared-task 2025 như bản gốc. Trong pipeline `python train.py`, project cũng tự in các metric tương tự bằng dev local trong `data/barec-corpus-v1`.
 
-```powershell
-python scripts/make_submission.py `
-  --predictions outputs/test_predictions.csv `
-  --output-dir submission
-```
+## Strict Track
 
-This creates:
-
-- `submission/prediction`
-- `submission/prediction.zip`
-
-The `prediction` file uses the Codabench format selected for this project:
-
-```csv
-Sentence ID,Prediction
-10100290001,7
-```
+Không thêm SAMER, từ điển ngoài, dữ liệu sinh bởi LLM, synthetic labels, hay bất kỳ training data ngoài BAREC Corpus. Project chỉ dùng BAREC Corpus trong `data/barec-corpus-v1` và pretrained AraBERTv2.

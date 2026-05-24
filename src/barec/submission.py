@@ -11,6 +11,7 @@ PREDICTION_ALIASES = ("Prediction", "prediction", "label", "predicted_label")
 
 
 def _first_existing(columns: pd.Index, candidates: tuple[str, ...]) -> str | None:
+    """Tìm tên cột đầu tiên tồn tại trong DataFrame."""
     for candidate in candidates:
         if candidate in columns:
             return candidate
@@ -18,7 +19,7 @@ def _first_existing(columns: pd.Index, candidates: tuple[str, ...]) -> str | Non
 
 
 def normalize_predictions(predictions: pd.DataFrame) -> pd.DataFrame:
-    """Return Codabench-ready predictions with strict column names."""
+    """Chuẩn hóa prediction về đúng 2 cột Codabench cần: `Sentence ID`, `Prediction`."""
     id_column = _first_existing(predictions.columns, ID_ALIASES)
     prediction_column = _first_existing(predictions.columns, PREDICTION_ALIASES)
 
@@ -36,6 +37,7 @@ def normalize_predictions(predictions: pd.DataFrame) -> pd.DataFrame:
     if normalized["Prediction"].isna().any():
         raise ValueError("Prediction contains missing values")
 
+    # Codabench yêu cầu nhãn dự đoán là số nguyên trong khoảng 1..19.
     try:
         normalized["Prediction"] = normalized["Prediction"].astype(int)
     except ValueError as exc:
@@ -50,7 +52,7 @@ def normalize_predictions(predictions: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_submission(predictions_path: str | Path, output_dir: str | Path) -> tuple[Path, Path]:
-    """Create Codabench `prediction` and `prediction.zip` files."""
+    """Tạo file `prediction` và nén thành `prediction.zip` để nộp Codabench."""
     predictions_path = Path(predictions_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

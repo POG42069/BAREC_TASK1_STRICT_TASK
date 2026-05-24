@@ -10,6 +10,8 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 
 class TextDataset(Dataset):
+    """Dataset nhỏ để tokenizer từng câu khi chạy inference."""
+
     def __init__(self, texts: list[str], tokenizer, max_length: int) -> None:
         self.texts = texts
         self.tokenizer = tokenizer
@@ -19,6 +21,7 @@ class TextDataset(Dataset):
         return len(self.texts)
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
+        """Tokenize một câu và trả tensor cho DataLoader."""
         return self.tokenizer(
             self.texts[index],
             truncation=True,
@@ -29,11 +32,13 @@ class TextDataset(Dataset):
 
 
 def collate_batch(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
+    """Ghép các sample đơn lẻ thành một batch tensor."""
     keys = batch[0].keys()
     return {key: torch.cat([item[key] for item in batch], dim=0) for key in keys}
 
 
 def parse_args() -> argparse.Namespace:
+    """Đọc tham số dòng lệnh cho bước dự đoán bằng model đã train."""
     parser = argparse.ArgumentParser(description="Predict BAREC readability labels with a trained model.")
     parser.add_argument("--model-dir", required=True, help="Directory containing the trained model.")
     parser.add_argument("--input-file", required=True, help="CSV file with ID and input text columns.")
@@ -46,6 +51,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Load model đã train, dự đoán nhãn 1..19, và ghi CSV kết quả."""
     args = parse_args()
     input_path = Path(args.input_file)
     output_path = Path(args.output_file)
@@ -67,6 +73,7 @@ def main() -> None:
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_batch)
 
     predictions: list[int] = []
+    # Tắt gradient để inference nhanh hơn và tiết kiệm bộ nhớ.
     with torch.no_grad():
         for step, batch in enumerate(loader, start=1):
             batch = {key: value.to(device) for key, value in batch.items()}
