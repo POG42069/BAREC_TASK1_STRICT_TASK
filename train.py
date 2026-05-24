@@ -17,13 +17,14 @@ Pipeline mặc định:
 import argparse
 import inspect
 import json
+import subprocess
 import sys
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import numpy as np
 import pandas as pd
-from datasets import Dataset
+from datasets import Dataset, load_dataset
 from sklearn.metrics import accuracy_score, cohen_kappa_score, f1_score, mean_absolute_error
 from transformers import (
     AutoModelForSequenceClassification,
@@ -37,6 +38,8 @@ from transformers import (
 BAREC_7_DICT = {1: 1, 2: 1, 3: 1, 4: 1, 5: 2, 6: 2, 7: 2, 8: 3, 9: 3, 10: 4, 11: 4, 12: 5, 13: 5, 14: 6, 15: 6, 16: 7, 17: 7, 18: 7, 19: 7}
 BAREC_5_DICT = {1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1, 8: 2, 9: 2, 10: 2, 11: 2, 12: 3, 13: 3, 14: 4, 15: 4, 16: 5, 17: 5, 18: 5, 19: 5}
 BAREC_3_DICT = {1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1, 8: 1, 9: 1, 10: 1, 11: 1, 12: 2, 13: 2, 14: 3, 15: 3, 16: 3, 17: 3, 18: 3, 19: 3}
+DEFAULT_DATASET_ID = "CAMeL-Lab/BAREC-Shared-Task-2026-sent"
+DATASET_META_FILE = "dataset_metadata.json"
 
 
 def configure_utf8_console() -> None:
@@ -50,6 +53,9 @@ def parse_args() -> argparse.Namespace:
     """Khai báo tham số dòng lệnh; nếu không truyền gì thì chạy cấu hình mặc định."""
     parser = argparse.ArgumentParser(description="Train AraBERTv2 and create BAREC Codabench submission zip.")
     parser.add_argument("--data-dir", default="data/barec-corpus-v1", help="Thư mục chứa train.csv, dev.csv, test.csv.")
+    parser.add_argument("--dataset-id", default=DEFAULT_DATASET_ID, help="Hugging Face dataset dùng để chuẩn bị dữ liệu local.")
+    parser.add_argument("--force-prepare-data", action="store_true", help="Tải lại dataset và tạo lại D3Tok dù data local đã tồn tại.")
+    parser.add_argument("--prepare-data-only", action="store_true", help="Chỉ tải dataset và tạo D3Tok, không train model.")
     parser.add_argument("--model-name", default="aubmindlab/bert-base-arabertv2", help="Checkpoint pretrained AraBERTv2.")
     parser.add_argument("--input-column", default="D3Tok", help="Cột văn bản đã được D3Tok trong dataset.")
     parser.add_argument("--label-column", default="Readability_Level_19", help="Cột nhãn 19 mức, giá trị 1..19.")
@@ -67,6 +73,122 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def build_d3tok_for_sentences(sentences: pd.Series) -> list[str]:
+    """Tạo D3Tok cho từng câu bằng CAMEL Tools.
+
+    Dataset BAREC 2026-sent trên Hugging Face không có sẵn cột `D3Tok`.
+    Hàm này dùng:
+    - `simple_word_tokenize` để tách dấu câu/ký hiệu khỏi chữ.
+    - `MLEDisambiguator` với model `calima-msa-r13`.
+    - `MorphologicalTokenizer` với scheme `d3tok`, `split=True`.
+
+    Kết quả được nối bằng khoảng trắng để dùng trực tiếp làm input cho AraBERTv2.
+    """
+    try:
+        from camel_tools.disambig.mle import MLEDisambiguator
+        from camel_tools.tokenizers.morphological import MorphologicalTokenizer
+        from camel_tools.tokenizers.word import simple_word_tokenize
+    except ImportError as exc:
+        raise ImportError("Thiếu camel-tools. Hãy cài dependencies bằng `pip install -r requirements.txt`.") from exc
+
+    try:
+        disambiguator = MLEDisambiguator.pretrained("calima-msa-r13")
+    except FileNotFoundError:
+        print("Thiếu CAMEL Tools data package. Script sẽ tự cài `disambig-mle-calima-msa-r13`.")
+        subprocess.run(
+            [sys.executable, "-m", "camel_tools.cli.camel_data", "--install", "disambig-mle-calima-msa-r13"],
+            check=True,
+        )
+        disambiguator = MLEDisambiguator.pretrained("calima-msa-r13")
+
+    tokenizer = MorphologicalTokenizer(disambiguator, "d3tok", split=True, diac=False)
+    d3tok_sentences: list[str] = []
+    total = len(sentences)
+
+    for index, sentence in enumerate(sentences.fillna("").astype(str), start=1):
+        words = simple_word_tokenize(sentence)
+        d3tok_sentences.append(" ".join(tokenizer.tokenize(words)))
+        if index == 1 or index % 5000 == 0 or index == total:
+            print(f"Đã tạo D3Tok: {index:,}/{total:,} câu")
+
+    return d3tok_sentences
+
+
+def local_dataset_ready(data_dir: Path, dataset_id: str, input_column: str) -> bool:
+    """Kiểm tra data local đã được chuẩn bị đúng dataset và có đủ D3Tok chưa."""
+    required_files = [data_dir / "train.csv", data_dir / "dev.csv", data_dir / "test.csv"]
+    metadata_path = data_dir / DATASET_META_FILE
+    if not all(path.exists() for path in required_files) or not metadata_path.exists():
+        return False
+
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return False
+    if metadata.get("dataset_id") != dataset_id:
+        return False
+
+    for path in required_files:
+        columns = pd.read_csv(path, nrows=0).columns
+        if input_column not in columns:
+            return False
+    return True
+
+
+def prepare_local_dataset(data_dir: Path, dataset_id: str, input_column: str, force: bool = False) -> None:
+    """Tải dataset 2026 từ Hugging Face, gọi CAMEL Tools tạo D3Tok, rồi lưu vào project.
+
+    Hàm này nằm trong `train.py` để toàn bộ pipeline nằm trong một file duy nhất.
+    Nếu dữ liệu local đã đúng dataset và đã có D3Tok thì bỏ qua để không tốn thời gian.
+    """
+    if not force and local_dataset_ready(data_dir, dataset_id, input_column):
+        print(f"Dataset local đã sẵn sàng trong {data_dir}.")
+        return
+
+    print(f"Tải dataset từ Hugging Face: {dataset_id}")
+    dataset = load_dataset(dataset_id)
+    split_to_file = {"train": "train.csv", "validation": "dev.csv", "test": "test.csv"}
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    for split_name, filename in split_to_file.items():
+        if split_name not in dataset:
+            raise ValueError(f"Dataset thiếu split bắt buộc: {split_name}")
+
+        frame = dataset[split_name].to_pandas()
+        if input_column not in frame.columns:
+            frame = ensure_input_column(frame, input_column)
+
+        output_path = data_dir / filename
+        frame.to_csv(output_path, index=False, encoding="utf-8")
+        print(f"Đã lưu {len(frame):,} dòng vào {output_path}")
+
+    metadata = {
+        "dataset_id": dataset_id,
+        "splits": split_to_file,
+        "input_column": input_column,
+        "d3tok_source": "camel_tools MLEDisambiguator calima-msa-r13 + MorphologicalTokenizer d3tok split=True",
+    }
+    (data_dir / DATASET_META_FILE).write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"Đã ghi metadata dataset vào {data_dir / DATASET_META_FILE}")
+
+
+def ensure_input_column(frame: pd.DataFrame, input_column: str) -> pd.DataFrame:
+    """Đảm bảo DataFrame có cột input D3Tok; nếu thiếu thì tự tạo từ `Sentence`."""
+    if input_column in frame.columns:
+        frame[input_column] = frame[input_column].fillna("").astype(str)
+        return frame
+
+    if input_column != "D3Tok":
+        raise ValueError(f"Không tìm thấy cột input `{input_column}` trong dữ liệu.")
+    if "Sentence" not in frame.columns:
+        raise ValueError("Không có cột `D3Tok` và cũng không có cột `Sentence` để tự tạo D3Tok.")
+
+    print("Dataset chưa có cột D3Tok. Bắt đầu tạo D3Tok bằng CAMEL Tools.")
+    frame = frame.copy()
+    frame["D3Tok"] = build_d3tok_for_sentences(frame["Sentence"])
+    return frame
+
+
 def read_labeled_split(data_dir: Path, filename: str, input_column: str, label_column: str) -> pd.DataFrame:
     """Đọc split có nhãn và đổi label từ 1..19 sang 0..18 cho Hugging Face Trainer."""
     path = data_dir / filename
@@ -74,6 +196,7 @@ def read_labeled_split(data_dir: Path, filename: str, input_column: str, label_c
         raise FileNotFoundError(f"Không tìm thấy file dữ liệu: {path}")
 
     frame = pd.read_csv(path)
+    frame = ensure_input_column(frame, input_column)
     missing = [column for column in ("ID", input_column, label_column) if column not in frame.columns]
     if missing:
         raise ValueError(f"{path} thiếu cột bắt buộc: {', '.join(missing)}")
@@ -98,6 +221,7 @@ def read_prediction_split(data_dir: Path, filename: str, input_column: str) -> p
         raise FileNotFoundError(f"Không tìm thấy file dữ liệu: {path}")
 
     frame = pd.read_csv(path)
+    frame = ensure_input_column(frame, input_column)
     missing = [column for column in ("ID", input_column) if column not in frame.columns]
     if missing:
         raise ValueError(f"{path} thiếu cột bắt buộc: {', '.join(missing)}")
@@ -242,6 +366,11 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     outputs_dir.mkdir(parents=True, exist_ok=True)
     submission_dir.mkdir(parents=True, exist_ok=True)
+
+    prepare_local_dataset(data_dir, args.dataset_id, args.input_column, force=args.force_prepare_data)
+    if args.prepare_data_only:
+        print("Đã chuẩn bị xong dataset local. Dừng vì bạn dùng --prepare-data-only.")
+        return
 
     print("Bắt đầu đọc dữ liệu BAREC có sẵn trong project.")
     train_frame = read_labeled_split(data_dir, "train.csv", args.input_column, args.label_column)

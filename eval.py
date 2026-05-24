@@ -6,9 +6,9 @@ Ví dụ dùng cho task sentence-level trên dev:
 
     python eval.py --output outputs/dev_predictions.csv --split Dev --task Sent
 
-Lưu ý: script này tải ground truth từ Hugging Face theo dataset shared-task 2025
-như bản gốc của ban tổ chức. Pipeline `train.py` cũng tự in các metric tương tự
-trên dev bằng dữ liệu local trong `data/barec-corpus-v1`.
+Lưu ý: script này tải ground truth từ Hugging Face theo dataset shared-task 2026.
+Pipeline `train.py` cũng tự in các metric tương tự trên dev bằng dữ liệu local
+trong `data/barec-corpus-v1`.
 """
 
 import argparse
@@ -55,7 +55,7 @@ if __name__ == "__main__":
     pred_dict = dict(zip(pred_ids, predictions))
 
     # Tải ground truth tương ứng từ Hugging Face theo script gốc.
-    barec = load_dataset("CAMeL-Lab/BAREC-Shared-Task-2025-" + args.task.lower(), split=split_name)
+    barec = load_dataset("CAMeL-Lab/BAREC-Shared-Task-2026-" + args.task.lower(), split=split_name)
     gold_ids = [str(id) for id in list(barec["ID"])]
     labels = list(barec["Readability_Level_19"])
 
