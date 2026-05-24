@@ -2,8 +2,9 @@
 
 Project này được tổ chức để chạy đơn giản nhất:
 
-- Dataset BAREC 2026 sentence-level được `train.py` tự tải từ `CAMeL-Lab/BAREC-Shared-Task-2026-sent` khi cần.
-- Dataset gốc trên Hugging Face không có `D3Tok`, nên `train.py` tự gọi CAMEL Tools để tạo cột này rồi lưu vào `data/barec-corpus-v1`.
+- Dataset BAREC 2026 sentence-level raw nằm trong `data/barec-corpus-v1`.
+- CSV trong project không có cột `D3Tok`, giống dataset gốc `CAMeL-Lab/BAREC-Shared-Task-2026-sent`.
+- `train.py` tự gọi CAMEL Tools để tạo `D3Tok` trong RAM khi chạy pipeline, không ghi `D3Tok` vào CSV dataset.
 - Chỉ có một file pipeline chính: `train.py`.
 - Chạy `python train.py` sẽ train model và tạo file zip để nộp.
 
@@ -39,8 +40,8 @@ python train.py
 File này sẽ tự làm toàn bộ pipeline:
 
 1. Kiểm tra dataset local trong `data/barec-corpus-v1`.
-2. Nếu dataset local chưa đúng bản 2026 hoặc thiếu `D3Tok`, tự tải dataset 2026 từ Hugging Face.
-3. Tự gọi CAMEL Tools để tạo `D3Tok` cho từng câu và lưu lại CSV trong project.
+2. Nếu dataset local chưa đúng bản 2026 raw, tự tải dataset 2026 từ Hugging Face.
+3. Tự gọi CAMEL Tools để tạo `D3Tok` cho từng câu trong RAM.
 4. Fine-tune `aubmindlab/bert-base-arabertv2` bằng cột `D3Tok`.
 5. In training loss trong lúc chạy.
 6. In score trên dev: Accuracy, Accuracy +/-1, Average absolute distance, QWK, Accuracy 7/5/3 levels.
@@ -73,7 +74,7 @@ Pipeline trong `train.py` đã tự in các metric tương tự trên dev local,
 
 ## D3Tok
 
-`train.py` dùng cột `D3Tok` làm input. Dataset 2026 gốc không có cột này, nên script tự tạo `D3Tok` bằng:
+`train.py` dùng D3Tok làm input. Dataset 2026 gốc và CSV trong project không có cột này, nên script tự tạo `D3Tok` trong RAM bằng:
 
 - `camel_tools.tokenizers.word.simple_word_tokenize`
 - `camel_tools.disambig.mle.MLEDisambiguator.pretrained("calima-msa-r13")`
